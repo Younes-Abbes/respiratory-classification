@@ -1,0 +1,38 @@
+# =====================================================================
+# Baseline configuration : reproduces the reference paper exactly.
+# Use this run as your control before activating any improvement.
+# =====================================================================
+
+# Data
+data_path: ./icbhi_ast_16k_8s.npz
+checkpoint_dir: ./checkpoints
+exp_name: baseline_ast_sam
+
+# Training
+epochs: 20
+batch_size: 8
+lr: 1.0e-5
+weight_decay: 1.0e-4
+seed: 42
+num_workers: 2
+amp: false
+
+# SAM (vanilla)
+rho: 0.05
+use_asam: false
+
+# Loss : standard cross-entropy + label smoothing 0.1 (paper).
+loss: ce
+focal_gamma: 0.0
+label_smoothing: 0.1
+
+# No extra augmentation: matches the paper's setup.
+use_specaugment: false
+use_mixup: false
+mixup_alpha: 0.0
+use_waveaug: false
+
+# No LR scheduler in the reference paper.
+scheduler: none
+warmup_epochs: 0
+differential_lr: false
