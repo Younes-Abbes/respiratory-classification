@@ -11,7 +11,7 @@
 
 | # | Task | Status | Verified By |
 |---|------|--------|-------------|
-| 1 | Project scaffold & git init | `[ ]` | folder tree matches spec |
+| 1 | Project scaffold & git init | `[x]` | folder tree matches spec |
 | 2 | Copilot skill + tasks files in place | `[ ]` | `.github/copilot-instructions.md` exists |
 | 3 | Virtual environment & dependencies | `[ ]` | `import librosa, torch, transformers` succeeds |
 | 4 | Dataset downloaded & verified | `[ ]` | 920 `.wav` files present, file count matches |
@@ -110,7 +110,7 @@ wandb/
 git init
 git add .
 git commit -m "chore: project scaffold"
-git remote add origin https://github.com/YOUR_USERNAME/respiratory-classification.git
+git remote add origin https://github.com/Younes-Abbes/respiratory-classification.git
 git push -u origin main
 ```
 
@@ -232,7 +232,7 @@ wav_files = glob.glob(os.path.join(raw_dir, "*.wav"))
 txt_files = glob.glob(os.path.join(raw_dir, "*.txt"))
 
 print(f"WAV files found: {len(wav_files)}")
-print(f"TXT files found: {len(txt_files)}")
+print(f"TXT files found: {len(txtmanua_files)}")
 
 # Each wav must have a matching txt
 wav_stems = {os.path.splitext(os.path.basename(f))[0] for f in wav_files}
