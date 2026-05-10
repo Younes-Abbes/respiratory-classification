@@ -12,8 +12,8 @@
 | # | Task | Status | Verified By |
 |---|------|--------|-------------|
 | 1 | Project scaffold & git init | `[x]` | folder tree matches spec |
-| 2 | Copilot skill + tasks files in place | `[ ]` | `.github/copilot-instructions.md` exists |
-| 3 | Virtual environment & dependencies | `[ ]` | `import librosa, torch, transformers` succeeds |
+| 2 | Copilot skill + tasks files in place | `[x]` | `.github/copilot-instructions.md` exists |
+| 3 | Virtual environment & dependencies | `[x]` | `import librosa, torch, transformers` succeeds |
 | 4 | Dataset downloaded & verified | `[ ]` | 920 `.wav` files present, file count matches |
 | 5 | Dataset exploration (EDA) | `[ ]` | notebook runs end-to-end, plots saved |
 | 6 | Annotation parser implemented | `[ ]` | unit test passes, label counts match ICBHI spec |
