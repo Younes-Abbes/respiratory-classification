@@ -2,24 +2,33 @@
 Audio Spectrogram Transformer (AST) wrapper for ICBHI 4-class classification.
 
 We start from the AudioSet-pretrained checkpoint
-    "MIT/ast-finetuned-audioset-10-10-0.4593"
+    ``MIT/ast-finetuned-audioset-10-10-0.4593``
 and replace the classification head with a small MLP for
-    {0: Normal, 1: Crackle, 2: Wheeze, 3: Both}.
+    ``{0: Normal, 1: Crackle, 2: Wheeze, 3: Both}``.
 
-Key design choices vs. the reference paper:
-    * Optional differential learning rate via `get_param_groups`:
-      the pretrained backbone uses a smaller LR than the new head.
-    * Optional layer-wise dropout in the head to regularise the limited
-      ICBHI training set.
-    * `get_features` returns the pooled embedding (768-d) so we can
-      run t-SNE / kNN evaluation without retraining.
+Key differences vs. the previous version
+----------------------------------------
+* We **do not** override ``max_length`` / ``num_mel_bins`` any more — the
+  AST positional embeddings are pretrained for 1024×128 inputs and any
+  reshape destroys most of what makes the model useful.
+* ``get_param_groups`` returns layer-wise-decayed learning rates for the
+  AST backbone plus a larger LR for the new head.
+* ``unfreeze_backbone`` lets the training script flip the frozen state
+  after the warm-up phase.
 """
+
+from __future__ import annotations
 
 from typing import List, Dict
 
 import torch
 import torch.nn as nn
-from transformers import ASTModel, ASTConfig
+from transformers import ASTModel
+
+
+# ---------------------------------------------------------------------------
+# AST + new head
+# ---------------------------------------------------------------------------
 
 class CustomAST(nn.Module):
     def __init__(
@@ -29,20 +38,12 @@ class CustomAST(nn.Module):
         head_hidden_dim: int = 256,
         head_dropout: float = 0.3,
         freeze_backbone: bool = False,
-        max_length: int = 345,      # ← your actual time frames
-        num_mel_bins: int = 128,    # ← your mel bins
     ) -> None:
         super().__init__()
-
-        config = ASTConfig.from_pretrained(backbone_name)
-        config.max_length = max_length
-        config.num_mel_bins = num_mel_bins
-
-        self.backbone = ASTModel.from_pretrained(
-            backbone_name,
-            config=config,
-            ignore_mismatched_sizes=True   # ← allows pos embedding reshape
-        )
+        # IMPORTANT: load with the native config — do NOT change max_length
+        # or num_mel_bins or the pretrained positional embeddings get
+        # silently re-initialised.
+        self.backbone = ASTModel.from_pretrained(backbone_name)
         self.feature_dim = self.backbone.config.hidden_size  # 768
 
         self.head = nn.Sequential(
@@ -55,45 +56,132 @@ class CustomAST(nn.Module):
         )
 
         if freeze_backbone:
-            for p in self.backbone.parameters():
-                p.requires_grad = False
+            self.freeze_backbone()
 
-    def get_features(self, input_values: torch.Tensor) -> torch.Tensor:
-        """Return pooled CLS embedding. Input: (B, 1, 128, T) or (B, T, 128)."""
-        if input_values.dim() == 4:
-            input_values = input_values.squeeze(1)       # (B, 128, T)
-            input_values = input_values.transpose(1, 2)  # (B, T, 128)
-        outputs = self.backbone(input_values=input_values)
+    # ------------------------------------------------------------------
+    # Freeze helpers
+    # ------------------------------------------------------------------
+    def freeze_backbone(self) -> None:
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+    def unfreeze_backbone(self) -> None:
+        for p in self.backbone.parameters():
+            p.requires_grad = True
+
+    # ------------------------------------------------------------------
+    # Forward
+    # ------------------------------------------------------------------
+    def _prepare_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """Accept the various shapes the dataset / dataloader may produce
+        and return ``(B, T, F)`` ready for ``ASTModel``."""
+
+        if x.dim() == 4:
+            # (B, 1, F, T) — legacy spectrogram layout from the CNN path.
+            x = x.squeeze(1)        # (B, F, T)
+            x = x.transpose(1, 2)   # (B, T, F)
+        elif x.dim() == 3:
+            # Already (B, T, F) — AST expects time first, freq second.
+            pass
+        else:
+            raise ValueError(f"Unexpected input shape {tuple(x.shape)}")
+        return x
+
+    def get_features(self, x: torch.Tensor) -> torch.Tensor:
+        x = self._prepare_inputs(x)
+        outputs = self.backbone(input_values=x)
         return outputs.pooler_output
 
-    def forward(self, input_values: torch.Tensor) -> torch.Tensor:
-        feats = self.get_features(input_values)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.get_features(x)
         return self.head(feats)
 
+    # ------------------------------------------------------------------
+    # Optimizer parameter groups
+    # ------------------------------------------------------------------
     def get_param_groups(
-        self, base_lr: float, head_lr_multiplier: float = 10.0
-    ):
-        return [
-            {"params": list(self.backbone.parameters()), "lr": base_lr},
-            {"params": list(self.head.parameters()), "lr": base_lr * head_lr_multiplier},
-        ]
+        self,
+        backbone_lr: float,
+        head_lr: float,
+        weight_decay: float = 0.0,
+        layerwise_lr_decay: float = 1.0,
+    ) -> List[Dict]:
+        """Return per-parameter-group settings for an optimizer.
 
-def load_model(num_classes: int = 4, use_pretrained: bool = False, **kwargs) -> nn.Module:
-    """Load the AST-based model or a lightweight fallback for local dry-runs.
+        Layers closer to the output get a higher LR, deeper layers get a
+        smaller LR (``layerwise_lr_decay ** depth``). This stabilises
+        fine-tuning of a transformer that was pretrained on AudioSet.
+        """
 
-    Args:
-        num_classes: number of output classes.
-        use_pretrained: if True, instantiate CustomAST which will load the
-            pretrained AudioSet weights (may download large checkpoints).
+        groups: List[Dict] = []
+        no_decay_keys = ("bias", "LayerNorm.weight", "layer_norm.weight")
 
-    Returns:
-        nn.Module ready for training/evaluation.
-    """
+        # --- AST backbone ------------------------------------------------
+        # 1. Embeddings (deepest, smallest LR).
+        embed_params = list(self.backbone.embeddings.parameters())
+        num_layers = len(self.backbone.encoder.layer)
+        embed_lr = backbone_lr * (layerwise_lr_decay ** (num_layers + 1))
+        groups.append({"params": [p for n, p in self.backbone.embeddings.named_parameters()
+                                  if not any(nd in n for nd in no_decay_keys)],
+                       "lr": embed_lr, "weight_decay": weight_decay})
+        groups.append({"params": [p for n, p in self.backbone.embeddings.named_parameters()
+                                  if any(nd in n for nd in no_decay_keys)],
+                       "lr": embed_lr, "weight_decay": 0.0})
+
+        # 2. Encoder layers — earlier layers get smaller LRs.
+        for layer_idx, layer in enumerate(self.backbone.encoder.layer):
+            depth = num_layers - layer_idx
+            lr_layer = backbone_lr * (layerwise_lr_decay ** depth)
+            groups.append({"params": [p for n, p in layer.named_parameters()
+                                      if not any(nd in n for nd in no_decay_keys)],
+                           "lr": lr_layer, "weight_decay": weight_decay})
+            groups.append({"params": [p for n, p in layer.named_parameters()
+                                      if any(nd in n for nd in no_decay_keys)],
+                           "lr": lr_layer, "weight_decay": 0.0})
+
+        # 3. Final layernorm of the backbone (closest to the head).
+        if hasattr(self.backbone, "layernorm"):
+            groups.append({"params": list(self.backbone.layernorm.parameters()),
+                           "lr": backbone_lr, "weight_decay": 0.0})
+
+        # --- Head --------------------------------------------------------
+        groups.append({"params": [p for n, p in self.head.named_parameters()
+                                  if not any(nd in n for nd in no_decay_keys)],
+                       "lr": head_lr, "weight_decay": weight_decay})
+        groups.append({"params": [p for n, p in self.head.named_parameters()
+                                  if any(nd in n for nd in no_decay_keys)],
+                       "lr": head_lr, "weight_decay": 0.0})
+
+        # Drop empty groups (some named_parameters() lists may be empty).
+        groups = [g for g in groups if len(list(g["params"])) > 0]
+        return groups
+
+
+# ---------------------------------------------------------------------------
+# Loader (with a lightweight CPU fallback for local dry-runs)
+# ---------------------------------------------------------------------------
+
+def load_model(
+    num_classes: int = 4,
+    use_pretrained: bool = False,
+    **kwargs,
+) -> nn.Module:
+    """Return ``CustomAST`` (if ``use_pretrained=True``) or a tiny CNN
+    fallback for local dry-runs without GPU."""
+
     if use_pretrained:
-        # This will instantiate the AST backbone and may download weights.
-        return CustomAST(num_classes=num_classes, **kwargs)
+        backbone_name = kwargs.pop(
+            "backbone_name", "MIT/ast-finetuned-audioset-10-10-0.4593"
+        )
+        # Strip any keys that no longer apply (legacy YAML may still have them).
+        for legacy_key in ("max_length", "num_mel_bins"):
+            kwargs.pop(legacy_key, None)
+        return CustomAST(
+            num_classes=num_classes,
+            backbone_name=backbone_name,
+            **kwargs,
+        )
 
-    # Lightweight fallback CNN: accepts (B, 1, 128, T) and returns (B, num_classes)
     class FallbackCNN(nn.Module):
         def __init__(self, num_classes: int):
             super().__init__()
@@ -110,7 +198,6 @@ def load_model(num_classes: int = 4, use_pretrained: bool = False, **kwargs) -> 
             self.fc = nn.Linear(32, num_classes)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            # x: (B, 1, 128, T)
             h = self.conv(x)
             h = h.view(h.size(0), -1)
             return self.fc(h)
@@ -119,23 +206,23 @@ def load_model(num_classes: int = 4, use_pretrained: bool = False, **kwargs) -> 
 
 
 def verify_checkpoint_is_ast(checkpoint_path: str) -> bool:
-    """
-    Returns True if checkpoint contains AST weights, False if fallback CNN.
-    Always call this after loading a checkpoint.
-    """
+    """Print a small report and return ``True`` if the checkpoint stores
+    AST weights, ``False`` if it stores the FallbackCNN."""
+
     ckpt = torch.load(checkpoint_path, map_location="cpu")
     state = ckpt.get("model_state", ckpt)
     keys = list(state.keys())
 
     is_ast = any("backbone" in k or "head" in k for k in keys)
-    is_fallback = any("conv" in k or "fc." in k for k in keys)
+    is_fallback = any(k.startswith(("conv.", "fc.")) for k in keys)
 
-    print(f"\n{'='*50}")
+    print("=" * 50)
     print(f"Checkpoint: {checkpoint_path}")
     print(f"  AST keys present     : {is_ast}")
     print(f"  Fallback CNN present : {is_fallback}")
     print(f"  Epoch saved at       : {ckpt.get('epoch', 'unknown')}")
-    print(f"  Best Se recorded     : {ckpt.get('best_Se', 'unknown')}")
-    print(f"  Architecture         : {'AST' if is_ast else 'FALLBACK CNN - DO NOT USE'}")
-    print(f"{'='*50}\n")
+    print(f"  Best val Score       : {ckpt.get('best_score', 'n/a')}")
+    print(f"  Best val Se          : {ckpt.get('best_Se', 'n/a')}")
+    print(f"  Architecture         : {'AST' if is_ast else 'FALLBACK CNN — DO NOT USE'}")
+    print("=" * 50)
     return is_ast
