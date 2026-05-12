@@ -90,9 +90,22 @@ def validate(model, loader, device, max_batches=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true", help="Run a short dry training run locally")
-    parser.add_argument("--resume", type=str, default="", help="Path to checkpoint to resume from")
+
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resume", type=str, default="")
     parser.add_argument("--epochs", type=int, default=2)
+
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default="checkpoints"
+    )
+
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default="logs"
+    )
     args = parser.parse_args(argv)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
