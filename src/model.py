@@ -19,12 +19,9 @@ from typing import List, Dict
 
 import torch
 import torch.nn as nn
-from transformers import ASTModel
-
+from transformers import ASTModel, ASTConfig
 
 class CustomAST(nn.Module):
-    """Audio Spectrogram Transformer with a 4-way classification head."""
-
     def __init__(
         self,
         num_classes: int = 4,
@@ -32,10 +29,21 @@ class CustomAST(nn.Module):
         head_hidden_dim: int = 256,
         head_dropout: float = 0.3,
         freeze_backbone: bool = False,
+        max_length: int = 345,      # ← your actual time frames
+        num_mel_bins: int = 128,    # ← your mel bins
     ) -> None:
         super().__init__()
-        self.backbone = ASTModel.from_pretrained(backbone_name)
-        self.feature_dim = self.backbone.config.hidden_size  # 768 for AST-base
+
+        config = ASTConfig.from_pretrained(backbone_name)
+        config.max_length = max_length
+        config.num_mel_bins = num_mel_bins
+
+        self.backbone = ASTModel.from_pretrained(
+            backbone_name,
+            config=config,
+            ignore_mismatched_sizes=True   # ← allows pos embedding reshape
+        )
+        self.feature_dim = self.backbone.config.hidden_size  # 768
 
         self.head = nn.Sequential(
             nn.LayerNorm(self.feature_dim),
@@ -51,12 +59,10 @@ class CustomAST(nn.Module):
                 p.requires_grad = False
 
     def get_features(self, input_values: torch.Tensor) -> torch.Tensor:
-        """Return the pooled CLS embedding (B, feature_dim)."""
-        # Input from DataLoader: (B, 1, 128, T)
-        # AST backbone expects: (B, T, 128)
+        """Return pooled CLS embedding. Input: (B, 1, 128, T) or (B, T, 128)."""
         if input_values.dim() == 4:
-            input_values = input_values.squeeze(1)      # (B, 128, T)
-            input_values = input_values.transpose(1, 2) # (B, T, 128)
+            input_values = input_values.squeeze(1)       # (B, 128, T)
+            input_values = input_values.transpose(1, 2)  # (B, T, 128)
         outputs = self.backbone(input_values=input_values)
         return outputs.pooler_output
 
@@ -64,26 +70,13 @@ class CustomAST(nn.Module):
         feats = self.get_features(input_values)
         return self.head(feats)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     def get_param_groups(
         self, base_lr: float, head_lr_multiplier: float = 10.0
-    ) -> List[Dict]:
-        """Return parameter groups with differential learning rates.
-
-        The pretrained AudioSet backbone gets `base_lr` while the new
-        classification head gets `base_lr * head_lr_multiplier`. This
-        prevents the strong AudioSet features from being overwritten by
-        the noisy gradients coming from the freshly-initialised head.
-        """
-        backbone_params = list(self.backbone.parameters())
-        head_params = list(self.head.parameters())
+    ):
         return [
-            {"params": backbone_params, "lr": base_lr},
-            {"params": head_params, "lr": base_lr * head_lr_multiplier},
+            {"params": list(self.backbone.parameters()), "lr": base_lr},
+            {"params": list(self.head.parameters()), "lr": base_lr * head_lr_multiplier},
         ]
-
 
 def load_model(num_classes: int = 4, use_pretrained: bool = False, **kwargs) -> nn.Module:
     """Load the AST-based model or a lightweight fallback for local dry-runs.
