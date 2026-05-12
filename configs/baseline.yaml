@@ -12,6 +12,7 @@ head_hidden_dim: 256
 head_dropout: 0.3
 
 # -- Input (AST native; do NOT override) ------------------
+# AST was pre-trained on 16 kHz, 128 mel bins, 1024 time frames.
 # We must respect those values or positional embeddings get reshaped.
 sample_rate: 16000
 target_duration: 8
