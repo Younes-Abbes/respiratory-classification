@@ -16,9 +16,13 @@ than caching it in advance is twofold:
 
 from typing import Tuple, Optional
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
+from src.preprocessing import preprocess_cycle
 
 from .augmentations import WaveformAugment
 
@@ -88,3 +92,27 @@ def make_weighted_sampler(labels: np.ndarray) -> torch.utils.data.WeightedRandom
         num_samples=len(labels),
         replacement=True,
     )
+
+
+class ICBHIDataset(torch.utils.data.Dataset):
+    """Dataset reading cycles from a CSV split and producing spectrogram tensors.
+
+    Returns spectrograms shaped (1, 128, T) and integer labels.
+    """
+
+    def __init__(self, csv_path: str, config: dict, augment: bool = False) -> None:
+        self.df = pd.read_csv(csv_path)
+        self.config = config
+        self.augment = augment
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        row = self.df.iloc[idx]
+        wav_path = str(Path("data") / "raw" / f"{row['recording_file']}.wav")
+        spec = preprocess_cycle(wav_path, float(row["start"]), float(row["end"]), self.config)
+        # spec shape: (128, T) -> convert to (1, 128, T)
+        spec_tensor = torch.tensor(spec, dtype=torch.float32).unsqueeze(0)
+        label = torch.tensor(int(row["label"]), dtype=torch.long)
+        return spec_tensor, label

@@ -80,3 +80,43 @@ class CustomAST(nn.Module):
             {"params": backbone_params, "lr": base_lr},
             {"params": head_params, "lr": base_lr * head_lr_multiplier},
         ]
+
+
+def load_model(num_classes: int = 4, use_pretrained: bool = False, **kwargs) -> nn.Module:
+    """Load the AST-based model or a lightweight fallback for local dry-runs.
+
+    Args:
+        num_classes: number of output classes.
+        use_pretrained: if True, instantiate CustomAST which will load the
+            pretrained AudioSet weights (may download large checkpoints).
+
+    Returns:
+        nn.Module ready for training/evaluation.
+    """
+    if use_pretrained:
+        # This will instantiate the AST backbone and may download weights.
+        return CustomAST(num_classes=num_classes, **kwargs)
+
+    # Lightweight fallback CNN: accepts (B, 1, 128, T) and returns (B, num_classes)
+    class FallbackCNN(nn.Module):
+        def __init__(self, num_classes: int):
+            super().__init__()
+            self.conv = nn.Sequential(
+                nn.Conv2d(1, 16, kernel_size=3, padding=1),
+                nn.BatchNorm2d(16),
+                nn.ReLU(),
+                nn.MaxPool2d((2, 2)),
+                nn.Conv2d(16, 32, kernel_size=3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool2d((1, 1)),
+            )
+            self.fc = nn.Linear(32, num_classes)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            # x: (B, 1, 128, T)
+            h = self.conv(x)
+            h = h.view(h.size(0), -1)
+            return self.fc(h)
+
+    return FallbackCNN(num_classes)

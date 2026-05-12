@@ -14,12 +14,12 @@
 | 1 | Project scaffold & git init | `[x]` | folder tree matches spec |
 | 2 | Copilot skill + tasks files in place | `[x]` | `.github/copilot-instructions.md` exists |
 | 3 | Virtual environment & dependencies | `[x]` | `import librosa, torch, transformers` succeeds |
-| 4 | Dataset downloaded & verified | `[ ]` | 920 `.wav` files present, file count matches |
-| 5 | Dataset exploration (EDA) | `[ ]` | notebook runs end-to-end, plots saved |
-| 6 | Annotation parser implemented | `[ ]` | unit test passes, label counts match ICBHI spec |
-| 7 | Patient-level train/test split | `[ ]` | zero patient overlap confirmed |
-| 8 | Preprocessing pipeline | `[ ]` | output shape `(128, 313)` for all cycles |
-| 9 | ICBHIDataset class | `[ ]` | DataLoader yields correct batch shapes |
+| 4 | Dataset downloaded & verified | `[x]` | 920 `.wav` files present, file count matches |
+| 5 | Dataset exploration (EDA) | `[x]` | notebook runs end-to-end, plots saved |
+| 6 | Annotation parser implemented | `[x]` | unit test passes, label counts match ICBHI spec |
+| 7 | Patient-level train/test split | `[x]` | zero patient overlap confirmed |
+| 8 | Preprocessing pipeline | `[x]` | output shape `(128, 313)` for all cycles |
+| 9 | ICBHIDataset class | `[x]` | DataLoader yields correct batch shapes |
 | 10 | Data augmentation | `[ ]` | augmented spectrograms visually verified |
 | 11 | Weighted sampler | `[ ]` | batch class distribution is balanced |
 | 12 | AST model loading | `[ ]` | forward pass succeeds, output shape `(B, 4)` |

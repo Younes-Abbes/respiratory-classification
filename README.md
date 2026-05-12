@@ -66,6 +66,49 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Local GPU (Windows) — GTX 1650 specific notes
+
+If you have an NVIDIA GPU such as a GeForce GTX 1650, follow these steps on Windows:
+
+1. Install the latest NVIDIA driver from https://www.nvidia.com/Download/index.aspx
+2. Install a CUDA-enabled PyTorch wheel into the active virtualenv. For example, for CUDA 11.8:
+
+```powershell
+.venv\Scripts\activate
+pip install --upgrade pip
+pip install --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio --extra-index-url https://pypi.org/simple
+```
+
+3. Verify the GPU is visible to PyTorch:
+
+```powershell
+.venv\Scripts\python.exe -c "import torch; print('cuda available:', torch.cuda.is_available()); print('device count:', torch.cuda.device_count());\
+print('device name:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no gpu')"
+```
+
+4. Recommended config overrides for a 4–6GB GPU (set in `configs/baseline.yaml` or via CLI):
+
+```yaml
+batch_size: 2
+use_pretrained: false   # set true only if you confirmed GPU memory is sufficient
+freeze_backbone: true  # freeze backbone initially to save memory
+amp: true              # enable mixed precision
+```
+
+5. Run training (dry-run example):
+
+```powershell
+.venv\Scripts\python.exe -m src.train --dry-run
+```
+
+If you want to fine-tune the full AST on the GTX 1650, consider these strategies to avoid OOM:
+- Freeze the backbone and train the head only for several epochs, then unfreeze progressively.
+- Use `batch_size: 1` and gradient accumulation to emulate larger batches.
+- Use `torch.cuda.amp` (already enabled via `amp: true`).
+- Reduce model input resolution or use the lightweight fallback model by setting `use_pretrained: false`.
+
+```
+
 ### Google Colab (recommandé — GPU gratuit)
 
 Ouvrir `notebooks/colab_quickstart.ipynb` dans Colab, choisir un runtime GPU (T4 suffit largement), puis exécuter les cellules dans l'ordre. Le notebook :

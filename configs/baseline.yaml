@@ -10,12 +10,19 @@ exp_name: baseline_ast_sam
 
 # Training
 epochs: 20
-batch_size: 8
+# On small GPUs (GTX 1650) use a small batch size. Override for larger GPUs.
+batch_size: 2
 lr: 1.0e-5
 weight_decay: 1.0e-4
 seed: 42
 num_workers: 2
-amp: false
+# Automatic Mixed Precision: recommended on GPU to save memory
+amp: true
+
+# Model loading: set to true to load pretrained AST weights (may download ~1GB+)
+use_pretrained: false
+# Freeze backbone initially to reduce memory & speed up training on small GPUs
+freeze_backbone: true
 
 # SAM (vanilla)
 rho: 0.05
