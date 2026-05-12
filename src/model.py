@@ -116,3 +116,26 @@ def load_model(num_classes: int = 4, use_pretrained: bool = False, **kwargs) -> 
             return self.fc(h)
 
     return FallbackCNN(num_classes)
+
+
+def verify_checkpoint_is_ast(checkpoint_path: str) -> bool:
+    """
+    Returns True if checkpoint contains AST weights, False if fallback CNN.
+    Always call this after loading a checkpoint.
+    """
+    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    state = ckpt.get("model_state", ckpt)
+    keys = list(state.keys())
+
+    is_ast = any("backbone" in k or "head" in k for k in keys)
+    is_fallback = any("conv" in k or "fc." in k for k in keys)
+
+    print(f"\n{'='*50}")
+    print(f"Checkpoint: {checkpoint_path}")
+    print(f"  AST keys present     : {is_ast}")
+    print(f"  Fallback CNN present : {is_fallback}")
+    print(f"  Epoch saved at       : {ckpt.get('epoch', 'unknown')}")
+    print(f"  Best Se recorded     : {ckpt.get('best_Se', 'unknown')}")
+    print(f"  Architecture         : {'AST' if is_ast else 'FALLBACK CNN - DO NOT USE'}")
+    print(f"{'='*50}\n")
+    return is_ast

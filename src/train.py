@@ -196,6 +196,15 @@ def main(argv=None):
     optimizer = get_optimizer(model, config)
     use_sam = float(cast(float, config.get("rho", 0.0))) > 0.0
 
+    # -- scheduler --
+    scheduler = None
+    if config.get("scheduler") == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer.base_optimizer if use_sam else optimizer,
+            T_max=n_epochs,
+            eta_min=1e-7,
+        )
+
     max_train_batches = 10 if args.dry_run else None
     max_val_batches = 10 if args.dry_run else None
 
@@ -249,6 +258,11 @@ def main(argv=None):
             "best_Se":     best_Se,
             "config":      config,
         }, ckpt_dir / "latest.pt")
+
+        if scheduler is not None:
+            scheduler.step()
+            current_lr = scheduler.get_last_lr()[0]
+            print(f"  LR: {current_lr:.2e}", flush=True)
 
     print("\n✅ Training complete.", flush=True)
     print(f"Best Se: {best_Se:.4f}", flush=True)

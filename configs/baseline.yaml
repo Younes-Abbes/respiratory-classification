@@ -1,45 +1,37 @@
-# =====================================================================
-# Baseline configuration : reproduces the reference paper exactly.
-# Use this run as your control before activating any improvement.
-# =====================================================================
+# -- Model -------------------------------------------------
+use_pretrained: true
+freeze_backbone: true
+backbone_name: "MIT/ast-finetuned-audioset-10-10-0.4593"
+num_classes: 4
+head_hidden_dim: 256
+head_dropout: 0.3
 
-# Data
-data_path: ./icbhi_ast_16k_8s.npz
-checkpoint_dir: ./checkpoints
-exp_name: baseline_ast_sam
+# -- Input -------------------------------------------------
+sample_rate: 22050
+target_duration: 8
+n_mels: 128
+max_length: 345
 
-# Training
-epochs: 20
-# On small GPUs (GTX 1650) use a small batch size. Override for larger GPUs.
+# -- Training ----------------------------------------------
+epochs: 50
 batch_size: 2
-lr: 1.0e-5
-weight_decay: 1.0e-4
-seed: 42
-num_workers: 2
-# Automatic Mixed Precision: recommended on GPU to save memory
 amp: true
 
-# Model loading: set to true to load pretrained AST weights (may download ~1GB+)
-use_pretrained: false
-# Freeze backbone initially to reduce memory & speed up training on small GPUs
-freeze_backbone: true
-
-# SAM (vanilla)
+# -- Optimizer ---------------------------------------------
+lr: 0.00005
+weight_decay: 0.0001
 rho: 0.05
-use_asam: false
 
-# Loss : standard cross-entropy + label smoothing 0.1 (paper).
+# -- Loss --------------------------------------------------
 loss: ce
-focal_gamma: 0.0
 label_smoothing: 0.1
+focal_gamma: 2.0
 
-# No extra augmentation: matches the paper's setup.
+# -- Augmentation ------------------------------------------
+augment: true
 use_specaugment: false
 use_mixup: false
-mixup_alpha: 0.0
 use_waveaug: false
 
-# No LR scheduler in the reference paper.
-scheduler: none
-warmup_epochs: 0
-differential_lr: false
+# -- Scheduler ---------------------------------------------
+scheduler: cosine
