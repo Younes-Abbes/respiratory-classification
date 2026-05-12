@@ -5,6 +5,5 @@ __pycache__/
 .env
 venv/
 wandb/
-*.pt
 *.pth
 .venv/
