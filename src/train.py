@@ -6,15 +6,16 @@ import argparse
 import csv
 import sys
 from pathlib import Path
+from typing import cast
 
 import torch
 from torch.utils.data import DataLoader
 
-from src.dataset import ICBHIDataset, make_weighted_sampler
-from src.model import load_model
-from src.losses import FocalLoss, class_balanced_alpha
-from src.metrics import icbhi_metrics
-from src.sam import SAM
+from .dataset import ICBHIDataset, make_weighted_sampler
+from .losses import FocalLoss, class_balanced_alpha
+from .metrics import icbhi_metrics
+from .model import load_model
+from .sam import SAM
 
 
 def get_optimizer(model, config):
@@ -125,37 +126,42 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     # ── force stdout flush (critical for Colab) ──
-    sys.stdout.reconfigure(line_buffering=True)
+    stdout = getattr(sys, "stdout", None)
+    if stdout is not None and hasattr(stdout, "reconfigure"):
+        stdout.reconfigure(line_buffering=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}", flush=True)
 
     import yaml
     with open(Path("configs") / "baseline.yaml", "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+        config_data = yaml.safe_load(f)
+    if not isinstance(config_data, dict):
+        raise TypeError("configs/baseline.yaml must contain a mapping")
+    config = cast(dict[str, object], config_data)
 
     # CLI epochs override config
-    n_epochs = args.epochs or int(config.get("epochs", 50))
+    n_epochs = args.epochs or int(cast(int, config.get("epochs", 50)))
     if args.dry_run:
         n_epochs = 2
     print(f"Training for {n_epochs} epochs", flush=True)
 
     # ── datasets ──
     train_ds = ICBHIDataset("data/splits/train.csv", config, augment=not args.dry_run)
-    test_ds  = ICBHIDataset("data/splits/test.csv",  config, augment=False)
+    test_ds = ICBHIDataset("data/splits/test.csv", config, augment=False)
     print(f"Train: {len(train_ds)} samples | Test: {len(test_ds)} samples", flush=True)
 
     import numpy as np
-    labels  = np.array(train_ds.df["label"].tolist(), dtype=int)
+    labels = np.array(train_ds.df["label"].tolist(), dtype=int)
     sampler = make_weighted_sampler(labels)
-    bs      = int(config.get("batch_size", 8))
+    bs = int(cast(int, config.get("batch_size", 8)))
 
-    train_loader = DataLoader(train_ds, batch_size=bs, sampler=sampler,  num_workers=2, pin_memory=True)
-    test_loader  = DataLoader(test_ds,  batch_size=bs, shuffle=False,    num_workers=2, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=bs, sampler=sampler, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False, num_workers=2, pin_memory=True)
 
     # ── model ──
-    use_pretrained  = bool(config.get("use_pretrained",  False))
-    freeze_backbone = bool(config.get("freeze_backbone", True))
+    use_pretrained = bool(cast(bool, config.get("use_pretrained", False)))
+    freeze_backbone = bool(cast(bool, config.get("freeze_backbone", True)))
     print(f"Loading model (pretrained={use_pretrained}, freeze={freeze_backbone})...", flush=True)
     model = load_model(use_pretrained=use_pretrained, freeze_backbone=freeze_backbone)
     model.to(device)
@@ -163,35 +169,35 @@ def main(argv=None):
 
     # ── resume ──
     start_epoch = 0
-    best_Se     = 0.0
+    best_Se = 0.0
     if args.resume:
         ckpt_path = Path(args.checkpoint_dir) / "best_model.pt"
         if ckpt_path.exists():
-            ckpt        = torch.load(ckpt_path, map_location=device)
+            ckpt = torch.load(ckpt_path, map_location=device)
             model.load_state_dict(ckpt["model_state"])
             start_epoch = ckpt.get("epoch", 0) + 1
-            best_Se     = ckpt.get("best_Se", 0.0)
+            best_Se = ckpt.get("best_Se", 0.0)
             print(f"Resumed from epoch {start_epoch}, best Se={best_Se:.4f}", flush=True)
 
     # ── loss ──
-    if config.get("loss", "ce") == "focal":
+    if cast(str, config.get("loss", "ce")) == "focal":
         counts = train_ds.df["label"].value_counts().reindex(range(4), fill_value=0).tolist()
-        alpha  = class_balanced_alpha(counts)
+        alpha = class_balanced_alpha(counts)
         criterion = FocalLoss(
             alpha=alpha,
-            gamma=float(config.get("focal_gamma", 2.0)),
-            label_smoothing=float(config.get("label_smoothing", 0.0))
+            gamma=float(cast(float, config.get("focal_gamma", 2.0))),
+            label_smoothing=float(cast(float, config.get("label_smoothing", 0.0)))
         )
     else:
         criterion = torch.nn.CrossEntropyLoss(
-            label_smoothing=float(config.get("label_smoothing", 0.0))
+            label_smoothing=float(cast(float, config.get("label_smoothing", 0.0)))
         )
 
     optimizer = get_optimizer(model, config)
-    use_sam   = float(config.get("rho", 0.0)) > 0.0
+    use_sam = float(cast(float, config.get("rho", 0.0))) > 0.0
 
     max_train_batches = 10 if args.dry_run else None
-    max_val_batches   = 10 if args.dry_run else None
+    max_val_batches = 10 if args.dry_run else None
 
     log_path  = Path(args.log_dir)  / "metrics.csv"
     ckpt_dir  = Path(args.checkpoint_dir)

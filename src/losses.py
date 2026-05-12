@@ -41,7 +41,7 @@ class FocalLoss(nn.Module):
 
     def __init__(
         self,
-        alpha: Optional[Sequence[float]] = None,
+        alpha: Optional[Sequence[float] | torch.Tensor] = None,
         gamma: float = 2.0,
         label_smoothing: float = 0.0,
         reduction: str = "mean",

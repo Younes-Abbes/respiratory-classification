@@ -1,0 +1,13 @@
+Baseline AST+SAM (Colab Training)
+============================================================
+Sensitivity (Se):    29.44%
+Specificity (Sp):    65.42%
+ICBHI Score:         47.43%
+============================================================
+Epochs trained:      0
+Test samples:        2895
+
+Reference Paper Targets:
+  Se:    68.31%
+  Sp:    67.89%
+  Score: 68.10%
