@@ -52,9 +52,12 @@ class CustomAST(nn.Module):
 
     def get_features(self, input_values: torch.Tensor) -> torch.Tensor:
         """Return the pooled CLS embedding (B, feature_dim)."""
+        # Input from DataLoader: (B, 1, 128, T)
+        # AST backbone expects: (B, T, 128)
+        if input_values.dim() == 4:
+            input_values = input_values.squeeze(1)      # (B, 128, T)
+            input_values = input_values.transpose(1, 2) # (B, T, 128)
         outputs = self.backbone(input_values=input_values)
-        # AST returns last_hidden_state of shape (B, num_patches+2, hidden);
-        # `pooler_output` is the post-MLP-tanh CLS embedding.
         return outputs.pooler_output
 
     def forward(self, input_values: torch.Tensor) -> torch.Tensor:
