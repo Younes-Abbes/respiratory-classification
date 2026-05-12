@@ -1,37 +1,83 @@
+# =================================================================
+#  ICBHI 2017 — AST + SAM Recovery Baseline
+#  Goal: beat the reference paper (Se 68.31%, Score 68.10%).
+# =================================================================
+
 # -- Model -------------------------------------------------
-use_pretrained: true
-freeze_backbone: true
+use_pretrained: true            # MUST be true — fallback CNN is for dry-run only
+freeze_backbone: false          # we unfreeze for proper fine-tuning
 backbone_name: "MIT/ast-finetuned-audioset-10-10-0.4593"
 num_classes: 4
 head_hidden_dim: 256
 head_dropout: 0.3
 
-# -- Input -------------------------------------------------
-sample_rate: 22050
+# -- Input (AST native; do NOT override) ------------------
+# We must respect those values or positional embeddings get reshaped.
+sample_rate: 16000
 target_duration: 8
 n_mels: 128
-max_length: 345
+ast_max_length: 1024            # = AST native pos-emb length
 
 # -- Training ----------------------------------------------
-epochs: 50
-batch_size: 2
+epochs: 40
+# Free-tier T4 has ~15 GB. AST (85 M params) + SAM (2x forward/backward) +
+# AdamW state is tight at bs=16, so we run bs=8 which fits comfortably and
+# leaves headroom for spectrogram aug + GradScaler state.
+batch_size: 8
+num_workers: 2
 amp: true
+seed: 42
 
-# -- Optimizer ---------------------------------------------
-lr: 0.00005
-weight_decay: 0.0001
-rho: 0.05
+# Patient-level validation split carved out of train.csv.
+# We use this for early-stopping; the test set is NEVER touched in training.
+val_split_frac: 0.15
+val_split_seed: 17
 
-# -- Loss --------------------------------------------------
-loss: ce
-label_smoothing: 0.1
-focal_gamma: 2.0
+# -- Warmup phase ------------------------------------------
+# During warm-up the backbone is frozen → only the head is trained on top
+# of the AudioSet features. After that we unfreeze and lower LR.
+warmup_epochs: 3
+warmup_head_lr: 0.001
 
-# -- Augmentation ------------------------------------------
-augment: true
-use_specaugment: false
-use_mixup: false
-use_waveaug: false
+# -- Optimizer (post-warmup) -------------------------------
+# Differential LR: small LR for the pre-trained AST backbone, larger for head.
+backbone_lr: 0.00001            # 1e-5
+head_lr: 0.0001                 # 1e-4
+weight_decay: 0.0005            # 5e-4
+layerwise_lr_decay: 0.85        # multiplied per AST layer (top to bottom)
+rho: 0.05                       # SAM perturbation radius
 
 # -- Scheduler ---------------------------------------------
-scheduler: cosine
+# Linear warm-up (over `lr_warmup_epochs`) then cosine to `lr_min`.
+scheduler: cosine_warmup
+lr_warmup_epochs: 2
+lr_min: 0.0000001               # 1e-7
+gradient_clip_norm: 1.0
+
+# -- Loss --------------------------------------------------
+loss: focal                     # focal | ce
+focal_gamma: 2.0
+label_smoothing: 0.05
+class_balanced_beta: 0.9999     # for class-balanced alpha (Cui et al. 2019)
+
+# -- Sampling ----------------------------------------------
+# "sqrt" = balanced with square-root frequency (less aggressive than "inverse").
+# "inverse" can cause the model to over-predict the minority class.
+sampler: sqrt                   # sqrt | inverse | none
+
+# -- Augmentation ------------------------------------------
+augment: true                   # master switch
+use_waveaug: true               # noise + time-shift + gain on the waveform
+use_specaugment: true           # SpecAugment after the feature extractor
+spec_freq_mask: 24
+spec_time_mask: 96
+spec_num_freq_masks: 2
+spec_num_time_masks: 2
+
+use_mixup: true
+mixup_alpha: 0.2
+mixup_prob: 0.5                 # apply mixup on 50% of batches
+
+# -- Early stopping ----------------------------------------
+early_stopping_patience: 12
+early_stopping_metric: val_Score
